@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include <catch2/catch_test_macros.hpp>
 
-#include "asio.hpp"
+#include "io_context.hpp"
 
 TEST_CASE("execution_work_guard reset when out of scope", "[execution_work_guard][io_context][io_context::run]")
 {

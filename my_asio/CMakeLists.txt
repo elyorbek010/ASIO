@@ -8,7 +8,7 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Catch2)
 
-add_library(asio "src/asio.cpp")
+add_library(asio "src/io_context.cpp")
 target_include_directories(asio PRIVATE inc)
 
 add_executable(test "test/test.cpp")
