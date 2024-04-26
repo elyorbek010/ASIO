@@ -2,4 +2,4 @@
 
 project ("ASIO")
 
-add_subdirectory ("asio")
+add_subdirectory ("my_asio")
