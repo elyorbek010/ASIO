@@ -6,18 +6,19 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "io_context.hpp"
+#include <boost/asio.hpp>
 
-TEST_CASE("execution_work_guard reset when out of scope", "[execution_work_guard][io_context][io_context::run]")
+TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][io_context][io_context::run]")
 {
 	/*
-	Thread calling run() is blocked as long as execution_work_guard is not destroyed
+	Thread calling run() is blocked as long as executor_work_guard is not destroyed
 	*/
 	my_asio::io_context io;
 	std::atomic<bool> starting_run(false);
 	std::atomic<bool> finished_run(false);
 
 	{
-		my_asio::execution_work_guard work(io);
+		my_asio::executor_work_guard work(io);
 
 		REQUIRE(work.owns_work() == true);
 
@@ -41,23 +42,23 @@ TEST_CASE("execution_work_guard reset when out of scope", "[execution_work_guard
 		REQUIRE(finished_run == false);
 	
 		REQUIRE(work.owns_work() == true);
-	} // execution_work_guard object is out of scope
+	} // executor_work_guard object is out of scope
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
 	REQUIRE(finished_run == true);
 }
 
-TEST_CASE("execution_work_guard manual reset", "[execution_work_guard][execution_work_guard::owns_work][[execution_work_guard::reset][io_context][io_context::run]")
+TEST_CASE("executor_work_guard manual reset", "[executor_work_guard][executor_work_guard::owns_work][[executor_work_guard::reset][io_context][io_context::run]")
 {
 	/*
-	Thread calling run() is blocked as long as execution_work_guard is not reset
+	Thread calling run() is blocked as long as executor_work_guard is not reset
 	*/
 	my_asio::io_context io;
 	std::atomic<bool> starting_run(false);
 	std::atomic<bool> finished_run(false);
 
-	my_asio::execution_work_guard work(io);
+	my_asio::executor_work_guard work(io);
 
 	REQUIRE(work.owns_work() == true);
 
@@ -483,7 +484,7 @@ TEST_CASE("strand poll_one", "[io_context][io_context::poll_one][strand][post]")
 	constexpr int NUMBER_OF_WORKERS = 100;
 
 	for (int i = 0; i != NUMBER_OF_WORKERS; ++i)
-		std::thread([]() {
+		std::thread([&io]() {
 			io.poll_one();
 			}).detach();
 
@@ -511,9 +512,11 @@ TEST_CASE("dispatch while running", "[io_context][io_context::run][dispatch][pos
 			counter++;
 			if (counter == 50)
 			{
-				std::lock_guard<std::mutex> lock(m);
-				dispatched = true;
-				cv.notify_one();
+				my_asio::dispatch(io, [&m, &cv, &dispatched]() {
+					std::lock_guard<std::mutex> lock(m);
+					dispatched = true;
+					cv.notify_one();
+					});
 			}
 			});
 
@@ -571,9 +574,11 @@ TEST_CASE("dispatch while polling", "[io_context][io_context::poll][dispatch][po
 			counter++;
 			if (counter == 50)
 			{
-				std::lock_guard<std::mutex> lock(m);
-				dispatched = true;
-				cv.notify_one();
+				my_asio::dispatch(io, [&m, &cv, &dispatched]() {
+					std::lock_guard<std::mutex> lock(m);
+					dispatched = true; 
+					cv.notify_one(); 
+					});
 			}
 			});
 
