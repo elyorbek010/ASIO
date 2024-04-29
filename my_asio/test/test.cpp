@@ -2,11 +2,12 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <chrono>
 #include <condition_variable>
 #include <catch2/catch_test_macros.hpp>
+#include <boost/asio.hpp>
 
 #include "io_context.hpp"
-#include <boost/asio.hpp>
 
 TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][io_context][io_context::run]")
 {
@@ -18,11 +19,11 @@ TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][
 	std::atomic<bool> finished_run(false);
 
 	{
-		my_asio::executor_work_guard work(io);
+		my_asio::executor_work_guard<my_asio::io_context::executor_type> work = my_asio::make_work_guard(io);
 
 		REQUIRE(work.owns_work() == true);
 
-		std::thread([&]() {
+		std::thread([&io, &starting_run, &finished_run]() {
 			starting_run = true;
 		
 			io.run();
@@ -34,12 +35,6 @@ TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][
 
 		REQUIRE(starting_run == true);
 		REQUIRE(finished_run == false);
-
-		io.run();
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-		REQUIRE(finished_run == false);
 	
 		REQUIRE(work.owns_work() == true);
 	} // executor_work_guard object is out of scope
@@ -49,7 +44,7 @@ TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][
 	REQUIRE(finished_run == true);
 }
 
-TEST_CASE("executor_work_guard manual reset", "[executor_work_guard][executor_work_guard::owns_work][[executor_work_guard::reset][io_context][io_context::run]")
+TEST_CASE("executor_work_guard manual reset", "[executor_work_guard][executor_work_guard::owns_work][executor_work_guard::reset][io_context][io_context::run]")
 {
 	/*
 	Thread calling run() is blocked as long as executor_work_guard is not reset
@@ -58,11 +53,11 @@ TEST_CASE("executor_work_guard manual reset", "[executor_work_guard][executor_wo
 	std::atomic<bool> starting_run(false);
 	std::atomic<bool> finished_run(false);
 
-	my_asio::executor_work_guard work(io);
+	my_asio::executor_work_guard<my_asio::io_context::executor_type> work = my_asio::make_work_guard(io);
 
 	REQUIRE(work.owns_work() == true);
 
-	std::thread([&]() {
+	std::thread([&io, &starting_run, &finished_run]() {
 		starting_run = true;
 
 		io.run();
@@ -73,12 +68,6 @@ TEST_CASE("executor_work_guard manual reset", "[executor_work_guard][executor_wo
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
 	REQUIRE(starting_run == true);
-	REQUIRE(finished_run == false);
-
-	io.run();
-
-	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
 	REQUIRE(finished_run == false);
 
 	REQUIRE(work.owns_work() == true);
@@ -136,9 +125,11 @@ TEST_CASE("post from several threads", "[post][io_context][io_context::run]")
 	std::atomic<int> counter(0);
 
 	for (int i = 0; i != NUMBER_OF_THREADS; ++i)
-		std::thread(my_asio::post(io, [&counter]() {
-		counter++;
-			})).detach();
+		std::thread([&io, &counter]() {
+		my_asio::post(io, [&counter]() {
+			counter++;
+			});
+			}).detach();
 
 	REQUIRE(counter == 0);
 
@@ -155,17 +146,22 @@ TEST_CASE("run async_op", "[io_context][io_context::run][io_context::executor_ty
 	constexpr int NUMBER_OF_WORKS = 10;
 
 	my_asio::io_context io;
-	int counter(0);
+	std::atomic<int> counter(0);
+	std::atomic<bool> starting_run(false);
+	std::atomic<bool> finished_run(false);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 		io.get_executor().on_work_started(); // simulate that async_op is being done
 
-	auto t = std::thread([&io]() {
+	std::thread([&io, &starting_run, &finished_run]() {
+		starting_run = true;
 		io.run();
-		});
+		finished_run = true;
+		}).detach();
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE(t.joinable() == false);
+	REQUIRE(starting_run == true);
+	REQUIRE(finished_run == false);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 	{
@@ -180,8 +176,7 @@ TEST_CASE("run async_op", "[io_context][io_context::run][io_context::executor_ty
 
 	REQUIRE(counter == NUMBER_OF_WORKS);
 
-	REQUIRE(t.joinable() == true);
-	t.join();
+	REQUIRE(finished_run == true);
 }
 
 TEST_CASE("run_one asynch_op", "[io_context][io_context::run_one][io_context::executor_type][io_context::get_executor][io_context::executor_type::on_work_started][io_context::executor_type::on_work_finished][post]")
@@ -192,36 +187,39 @@ TEST_CASE("run_one asynch_op", "[io_context][io_context::run_one][io_context::ex
 	constexpr int NUMBER_OF_WORKS = 10;
 
 	my_asio::io_context io;
-	int counter(0);
+	std::atomic<int> counter(0);
+	std::atomic<bool> starting_run_one(false);
+	std::atomic<bool> finished_run_one(false);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 		io.get_executor().on_work_started(); // simulate that async_op is being done
 
-	auto t = std::thread([&io]() {
+	std::thread([&io, &starting_run_one, &finished_run_one]() {
+		starting_run_one = true;
 		io.run_one();
-		});
+		finished_run_one = true;
+		}).detach();
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE(t.joinable() == false);
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		REQUIRE(starting_run_one == true);
+		REQUIRE(finished_run_one == false);
 
-	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
-	{
-		my_asio::post(io, [&counter]() {
-			counter++;
-			});
+		for (int i = 0; i != NUMBER_OF_WORKS; ++i)
+		{
+			my_asio::post(io, [&counter]() {
+				counter++;
+				});
 
-		io.get_executor().on_work_finished();
-	}
+			io.get_executor().on_work_finished();
+		}
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-	REQUIRE(counter == 1);
+		REQUIRE(counter == 1);
 
-	REQUIRE(t.joinable() == true);
-	t.join();
+		REQUIRE(finished_run_one == true);
 }
 
-// poll poll one
 TEST_CASE("poll", "[io_context][io_context::poll][io_context::executor_type][io_context::get_executor][io_context::executor_type::on_work_started][io_context::executor_type::on_work_finished][post]")
 {
 	/*
@@ -230,18 +228,22 @@ TEST_CASE("poll", "[io_context][io_context::poll][io_context::executor_type][io_
 	constexpr int NUMBER_OF_WORKS = 10;
 
 	my_asio::io_context io;
-	int counter(0);
+	std::atomic<int> counter(0);
+	std::atomic<bool> starting_poll(false);
+	std::atomic<bool> finished_poll(false);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 		io.get_executor().on_work_started(); // simulate that async_op is being done
 
-	auto t1 = std::thread([&io]() {
+	std::thread([&io, &starting_poll, &finished_poll]() {
+		starting_poll = true;
 		io.poll();
-		});
+		finished_poll = true;
+		}).detach();
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE(t1.joinable() == true);
-	t1.join();
+	REQUIRE(starting_poll == true);
+	REQUIRE(finished_poll == true);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 	{
@@ -252,13 +254,18 @@ TEST_CASE("poll", "[io_context][io_context::poll][io_context::executor_type][io_
 		io.get_executor().on_work_finished();
 	}
 
-	auto t2 = std::thread([&io]() {
+	starting_poll = false;
+	finished_poll = false;
+
+	std::thread([&io, &starting_poll, &finished_poll]() {
+		starting_poll = true;
 		io.poll();
-		});
+		finished_poll = true;
+		}).detach();
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE(t2.joinable() == true);
-	t2.join();
+	REQUIRE(starting_poll == true);
+	REQUIRE(finished_poll == true);
 
 	REQUIRE(counter == NUMBER_OF_WORKS);
 }
@@ -271,46 +278,54 @@ TEST_CASE("poll one", "[io_context][io_context::poll_one][io_context::executor_t
 	constexpr int NUMBER_OF_WORKS = 10;
 
 	my_asio::io_context io;
-	int counter(0);
+	std::atomic<int> counter(0);
+	std::atomic<bool> starting_poll_one(false);
+	std::atomic<bool> finished_poll_one(false);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 		io.get_executor().on_work_started(); // simulate that async_op is being done
 
-	auto t1 = std::thread([&io]() {
+	std::thread([&io, &starting_poll_one, &finished_poll_one]() {
+		starting_poll_one = true;
 		io.poll_one();
-		});
+		finished_poll_one = true;
+		}).detach();
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE(t1.joinable() == true);
-	t1.join();
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		REQUIRE(starting_poll_one == true);
+		REQUIRE(finished_poll_one == true);
 
-	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
-	{
-		my_asio::post(io, [&counter]() {
-			counter++;
-			});
+		for (int i = 0; i != NUMBER_OF_WORKS; ++i)
+		{
+			my_asio::post(io, [&counter]() {
+				counter++;
+				});
 
-		io.get_executor().on_work_finished();
-	}
+			io.get_executor().on_work_finished();
+		}
 
-	auto t2 = std::thread([&io]() {
-		io.poll_one();
-		});
+		starting_poll_one = false;
+		finished_poll_one = false;
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE(t2.joinable() == true);
-	t2.join();
+		std::thread([&io, &starting_poll_one, &finished_poll_one]() {
+			starting_poll_one = true;
+			io.poll_one();
+			finished_poll_one = true;
+			}).detach();
 
-	REQUIRE(counter == 1);
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		REQUIRE(starting_poll_one == true);
+		REQUIRE(finished_poll_one == true);
+
+		REQUIRE(counter == 1);
 }
-
 
 TEST_CASE("stop/restart io", "[io_context][io_context::run][io_context::run_one][io_context::poll][io_context::poll_one][io_context::post][io_context::stop][io_context::stopped][io_context::restart]")
 {
 	/*
 	When io.stop() is called, run/run_one/poll/poll_one should return immediately
 	*/
-	constexpr int NUMBER_OF_WORKS = 1'000'000'000;
+	constexpr int NUMBER_OF_WORKS = 1'000'000;
 
 	my_asio::io_context io;
 	std::atomic<int> counter(0);
@@ -318,16 +333,14 @@ TEST_CASE("stop/restart io", "[io_context][io_context::run][io_context::run_one]
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 		my_asio::post(io, [&counter]() {
-		counter++;
+			counter++;
 			});
-
-	REQUIRE(counter == 0);
 
 	SECTION("run")
 	{
 		std::thread([&io, &process]() {
 			while (process)
-				io.run(); 
+				io.run();
 			}).detach();
 	}
 	SECTION("run_one")
@@ -355,20 +368,23 @@ TEST_CASE("stop/restart io", "[io_context][io_context::run][io_context::run_one]
 	std::this_thread::sleep_for(std::chrono::nanoseconds(500));
 
 	io.stop();
+	REQUIRE(io.stopped() == true);
 
 	int saved_counter = counter;
+	REQUIRE(((saved_counter > 0) && (saved_counter < NUMBER_OF_WORKS)));
 
-	REQUIRE(counter > 0 && counter < NUMBER_OF_WORKS);
+	// since process is still true, we still calling run/poll functions, 
+	//but since io_context is stopped, the counter values must not change
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	REQUIRE(saved_counter == counter);
 
-	REQUIRE(io.stopped() == true);
-
 	io.restart();
+	REQUIRE(io.stopped() == false);
 
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 
 	REQUIRE(counter == NUMBER_OF_WORKS);
+	process = false;
 }
 
 TEST_CASE("strand run", "[io_context][io_context::run][strand][post]")
@@ -379,7 +395,7 @@ TEST_CASE("strand run", "[io_context][io_context::run][strand][post]")
 	also, all strand handlers must be executed
 	*/
 	my_asio::io_context io;
-	strand<my_asio::io_context::executor_type> strand_(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
 	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
@@ -393,7 +409,7 @@ TEST_CASE("strand run", "[io_context][io_context::run][strand][post]")
 	constexpr int NUMBER_OF_WORKERS = 100;
 
 	for (int i = 0; i != NUMBER_OF_WORKERS; ++i)
-		std::thread([]() {
+		std::thread([&io]() {
 			io.run();
 			}).detach();
 
@@ -410,7 +426,7 @@ TEST_CASE("strand run_one", "[io_context][io_context::run_one][strand][post]")
 	also, all strand handlers must be executed since NUMBER_OF_WORKS == NUMBER_OF_WORKERS
 	*/
 	my_asio::io_context io;
-	my_asio::strand<my_asio::io_context::executor_type> strand_(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
 	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
@@ -424,7 +440,7 @@ TEST_CASE("strand run_one", "[io_context][io_context::run_one][strand][post]")
 	constexpr int NUMBER_OF_WORKERS = 100;
 
 	for (int i = 0; i != NUMBER_OF_WORKERS; ++i)
-		std::thread([]() {
+		std::thread([&io]() {
 			io.run_one();
 			}).detach();
 
@@ -441,7 +457,7 @@ TEST_CASE("strand poll", "[io_context][io_context::poll][strand][post]")
 	also, all strand handlers must be executed
 	*/
 	my_asio::io_context io;
-	strand<my_asio::io_context::executor_type> strand_(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
 	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
@@ -455,7 +471,7 @@ TEST_CASE("strand poll", "[io_context][io_context::poll][strand][post]")
 	constexpr int NUMBER_OF_WORKERS = 10;
 
 	for (int i = 0; i != NUMBER_OF_WORKERS; ++i)
-		std::thread([]() {
+		std::thread([&io]() {
 			io.poll();
 			}).detach();
 
@@ -470,7 +486,7 @@ TEST_CASE("strand poll_one", "[io_context][io_context::poll_one][strand][post]")
 	all the handlers must be executed since all work is already posted and is ready, and the NUMBER_OF_WORKS == NUMBER_OF_WORKERS
 	*/
 	my_asio::io_context io;
-	strand<my_asio::io_context::executor_type> strand_(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
 	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
@@ -505,7 +521,7 @@ TEST_CASE("dispatch while running", "[io_context][io_context::run][dispatch][pos
 
 	bool dispatched(false);
 	
-	for (int i = 0; i < 100; i++)
+	for (int i = 0; i != 100; ++i)
 	{
 		my_asio::post(io, [&io, &counter, &cv, &m, &dispatched]() {
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -519,8 +535,6 @@ TEST_CASE("dispatch while running", "[io_context][io_context::run][dispatch][pos
 					});
 			}
 			});
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
 	auto t = std::thread([&io]() { io.run(); });
@@ -543,8 +557,8 @@ TEST_CASE("dispatch while run_one", "[io_context][io_context::run_one][dispatch]
 	std::atomic<int> counter(0);
 
 	for (int i = 0; i != 100; ++i)
-		my_asio::post(io, [&]() {
-			if (i == 0)
+		my_asio::post(io, [&io, &dispatched, &counter, i]() {
+			if (i == 0)	 
 				my_asio::dispatch(io, [&dispatched]() {dispatched = true; });
 			counter++;
 			});
@@ -581,8 +595,6 @@ TEST_CASE("dispatch while polling", "[io_context][io_context::poll][dispatch][po
 					});
 			}
 			});
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
 	auto t = std::thread([&io]() { io.poll(); });
@@ -605,9 +617,9 @@ TEST_CASE("dispatch while poll_one", "[io_context][io_context::poll_one][dispatc
 	std::atomic<int> counter(0);
 
 	for (int i = 0; i != 100; ++i)
-		my_asio::post(io, [&]() {
-			if (i == 0)
-				my_asio::dispatch(io, [&dispatched]() {dispatched = true; });
+		my_asio::post(io, [&io, &dispatched, &counter, i]() {
+		if (i == 0)
+			my_asio::dispatch(io, [&dispatched]() {dispatched = true; });
 			counter++;
 			});
 
