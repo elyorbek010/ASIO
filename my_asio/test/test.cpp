@@ -5,7 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <catch2/catch_test_macros.hpp>
-#include <boost/asio.hpp>
+//#include <boost/asio.hpp> // uncomment if there is a need to check functions on boost library, and replace my_asio:: to boost::asio::
 
 #include "io_context.hpp"
 
@@ -396,7 +396,6 @@ TEST_CASE("strand run", "[io_context][io_context::run][strand][post]")
 	*/
 	my_asio::io_context io;
 	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
-	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 100;
@@ -427,7 +426,6 @@ TEST_CASE("strand run_one", "[io_context][io_context::run_one][strand][post]")
 	*/
 	my_asio::io_context io;
 	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
-	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 100;
@@ -458,7 +456,6 @@ TEST_CASE("strand poll", "[io_context][io_context::poll][strand][post]")
 	*/
 	my_asio::io_context io;
 	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
-	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 1000;
@@ -480,14 +477,13 @@ TEST_CASE("strand poll", "[io_context][io_context::poll][strand][post]")
 	REQUIRE(s_counter == NUMBER_OF_WORKS);
 }
 
-TEST_CASE("strand poll_one", "[io_context][io_context::poll_one][strand][post]")
+TEST_CASE("strand poll_one", "[io_context][io_context::poll_one][strand][post")
 {
 	/*
 	all the handlers must be executed since all work is already posted and is ready, and the NUMBER_OF_WORKS == NUMBER_OF_WORKERS
 	*/
 	my_asio::io_context io;
 	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
-	std::atomic<int> a_counter(0);
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 100;
@@ -507,6 +503,35 @@ TEST_CASE("strand poll_one", "[io_context][io_context::poll_one][strand][post]")
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
 	REQUIRE(s_counter >= 1);
+}
+
+TEST_CASE("strand + io_context post", "")
+{
+	/*
+	s_counter is incremented only in strand, so it should not experience race condition, whereas
+	a_counter is incremented concurrently in many threads, and at least several of them should be in race condition
+	*/
+	my_asio::io_context io;
+	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
+	int s_counter(0);
+	int a_counter(0);
+
+	constexpr int NUMBER_OF_WORKS = 10000;
+	constexpr int NUMBER_OF_WORKERS = 100;
+
+	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
+		my_asio::post(strand_, [&s_counter]() {s_counter++; });
+
+	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
+		my_asio::post(io, [&a_counter]() {a_counter++; });
+
+	for (int i = 0; i != NUMBER_OF_WORKERS; ++i)
+		std::thread([&io]() {io.run(); }).detach();
+
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+
+	REQUIRE(s_counter == NUMBER_OF_WORKS);
+	REQUIRE(a_counter != NUMBER_OF_WORKS);
 }
 
 TEST_CASE("dispatch while running", "[io_context][io_context::run][dispatch][post]")
