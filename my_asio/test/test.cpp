@@ -5,9 +5,27 @@
 #include <chrono>
 #include <condition_variable>
 #include <catch2/catch_test_macros.hpp>
-//#include <boost/asio.hpp> // uncomment if there is a need to check functions on boost library, and replace my_asio:: to boost::asio::
+// #include <boost/asio.hpp> // uncomment if there is a need to check functions on boost library, and replace my_asio:: to boost::asio::
 
 #include "io_context.hpp"
+#include "executor_work_guard.hpp"
+#include "strand.hpp"
+
+TEST_CASE()
+{
+	my_asio::io_context io;
+	my_asio::strand<my_asio::io_context::executor_type> strand(io.get_executor());
+	my_asio::post(strand, [&io, &strand]() {
+		if (strand.running_in_this_thread())
+			REQUIRE(true);
+		if (io.get_executor().running_in_this_thread())
+			REQUIRE(true);
+		if (io.get_executor().can_dispatch())
+			REQUIRE(true);
+		});
+
+	io.run();
+}
 
 TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][io_context][io_context::run]")
 {
@@ -19,7 +37,7 @@ TEST_CASE("executor_work_guard reset when out of scope", "[executor_work_guard][
 	std::atomic<bool> finished_run(false);
 
 	{
-		my_asio::executor_work_guard<my_asio::io_context::executor_type> work = my_asio::make_work_guard(io);
+		my_asio::executor_work_guard<my_asio::io_context::executor_type> work(io.get_executor());
 
 		REQUIRE(work.owns_work() == true);
 
@@ -53,7 +71,7 @@ TEST_CASE("executor_work_guard manual reset", "[executor_work_guard][executor_wo
 	std::atomic<bool> starting_run(false);
 	std::atomic<bool> finished_run(false);
 
-	my_asio::executor_work_guard<my_asio::io_context::executor_type> work = my_asio::make_work_guard(io);
+	my_asio::executor_work_guard<my_asio::io_context::executor_type> work(io.get_executor());
 
 	REQUIRE(work.owns_work() == true);
 
@@ -141,6 +159,7 @@ TEST_CASE("post from several threads", "[post][io_context][io_context::run]")
 TEST_CASE("run async_op", "[io_context][io_context::run][io_context::executor_type][io_context::get_executor][io_context::executor_type::on_work_started][io_context::executor_type::on_work_finished][post]")
 {
 	/*
+	* 
 	io_context::run() should block and run event processing loop until no outstanding work and ready handlers left
 	*/
 	constexpr int NUMBER_OF_WORKS = 10;
@@ -148,6 +167,8 @@ TEST_CASE("run async_op", "[io_context][io_context::run][io_context::executor_ty
 	my_asio::io_context io;
 	std::atomic<int> counter(0);
 	std::atomic<bool> starting_run(false);
+
+
 	std::atomic<bool> finished_run(false);
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
@@ -371,10 +392,11 @@ TEST_CASE("stop/restart io", "[io_context][io_context::run][io_context::run_one]
 	REQUIRE(io.stopped() == true);
 
 	int saved_counter = counter;
-	REQUIRE(((saved_counter > 0) && (saved_counter < NUMBER_OF_WORKS)));
+	REQUIRE(saved_counter > 0);
+	REQUIRE(saved_counter < NUMBER_OF_WORKS);
 
-	// since process is still true, we still calling run/poll functions, 
-	//but since io_context is stopped, the counter values must not change
+	/*since process is still true, we still calling run / poll functions,
+	but since io_context is stopped, the counter values must not change*/
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	REQUIRE(saved_counter == counter);
 
@@ -395,10 +417,10 @@ TEST_CASE("strand run", "[io_context][io_context::run][strand][post]")
 	also, all strand handlers must be executed
 	*/
 	my_asio::io_context io;
-	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_(io.get_executor());
 	int s_counter(0);
 
-	constexpr int NUMBER_OF_WORKS = 100;
+ 	constexpr int NUMBER_OF_WORKS = 100;
 
 	for (int i = 0; i != NUMBER_OF_WORKS; ++i)
 		my_asio::post(strand_, [&s_counter]() {
@@ -425,7 +447,7 @@ TEST_CASE("strand run_one", "[io_context][io_context::run_one][strand][post]")
 	also, all strand handlers must be executed since NUMBER_OF_WORKS == NUMBER_OF_WORKERS
 	*/
 	my_asio::io_context io;
-	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_(io.get_executor());
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 100;
@@ -455,7 +477,7 @@ TEST_CASE("strand poll", "[io_context][io_context::poll][strand][post]")
 	also, all strand handlers must be executed
 	*/
 	my_asio::io_context io;
-	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_(io.get_executor());
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 1000;
@@ -483,7 +505,7 @@ TEST_CASE("strand poll_one", "[io_context][io_context::poll_one][strand][post")
 	all the handlers must be executed since all work is already posted and is ready, and the NUMBER_OF_WORKS == NUMBER_OF_WORKERS
 	*/
 	my_asio::io_context io;
-	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_(io.get_executor());
 	int s_counter(0);
 
 	constexpr int NUMBER_OF_WORKS = 100;
@@ -512,7 +534,7 @@ TEST_CASE("strand + io_context post", "")
 	a_counter is incremented concurrently in many threads, and at least several of them should be in race condition
 	*/
 	my_asio::io_context io;
-	my_asio::strand<my_asio::io_context::executor_type> strand_ = my_asio::make_strand(io);
+	my_asio::strand<my_asio::io_context::executor_type> strand_(io.get_executor());
 	int s_counter(0);
 	int a_counter(0);
 
@@ -651,5 +673,20 @@ TEST_CASE("dispatch while poll_one", "[io_context][io_context::poll_one][dispatc
 	io.poll_one();
 
 	REQUIRE(counter == 1);
+	REQUIRE(dispatched == true);
+}
+
+TEST_CASE("dispatch from strand", "")
+{
+	my_asio::io_context io;
+	my_asio::strand<my_asio::io_context::executor_type> strand(io.get_executor());
+	std::atomic<int> dispatched(false);
+	
+	my_asio::post(strand, [&strand, &dispatched]() {
+		my_asio::dispatch(strand, [&dispatched]() { dispatched = true; });
+		});
+
+	io.run_one();
+
 	REQUIRE(dispatched == true);
 }
