@@ -30,8 +30,6 @@ public:
 
 	executor_type get_executor();
 
-	size_t do_one(bool blocking);
-
 	size_t run();
 
 	size_t run_one();
@@ -47,6 +45,8 @@ public:
 	void restart();
 
 private:
+	size_t do_one(bool blocking);
+
 	void work_started();
 
 	void work_finished();
