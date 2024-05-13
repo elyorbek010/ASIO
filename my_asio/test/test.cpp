@@ -398,7 +398,7 @@ TEST_CASE("stop/restart io", "[io_context][io_context::run][io_context::run_one]
 	/*since process is still true, we still calling run / poll functions,
 	but since io_context is stopped, the counter values must not change*/
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
-	REQUIRE((saved_counter >= counter) && (saved_counter <= counter + 1)); // because when we stopped, one handler might already be in execution state, it will finish its job
+	REQUIRE(((saved_counter >= counter) && (saved_counter <= counter + 1))); // because when we stopped, one handler might already be in execution state, it will finish its job
 
 	io.restart();
 	REQUIRE(io.stopped() == false);
