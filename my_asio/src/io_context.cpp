@@ -7,10 +7,17 @@ size_t io_context::do_one(bool blocking)
 {
 	for (;;)
 	{
-		std::unique_lock<std::mutex> lock(queue_guard_);
 
 		if (stopped())
 			return 0;
+
+		std::unique_lock<std::mutex> lock(queue_guard_);
+
+		if (stopped())
+		{
+			lock.unlock();
+			return 0;
+		}
 
 		std::function<void()> handler;
 		if (!work_queue_.empty())
