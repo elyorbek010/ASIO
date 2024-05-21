@@ -5,7 +5,7 @@ namespace my_asio
 {
 namespace detail
 {
-template<typename Key, typename Value = unsigned char>
+template<typename Key, typename Value = void>
 class call_stack
 {
 public:
@@ -17,7 +17,7 @@ public:
 	public:
 		context(Key* key)
 			: key(key)
-			, value(reinterpret_cast<unsigned char*>(this))
+			, value(reinterpret_cast<void*>(this))
 			, next(top)
 		{
 			top = this;
